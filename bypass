@@ -1,0 +1,578 @@
+#!/usr/bin/env python3
+"""
+BYPASS - High-Performance Low-Level DPI Bypass & Censorship Circumvention Suite
+Bypasses middlebox/firewall TLS SNI Inspection (Fortinet, Indian ISPs, College/Enterprise Firewalls)
+"""
+
+import sys
+import os
+import time
+import json
+import signal
+import socket
+import subprocess
+import argparse
+from pathlib import Path
+
+# Paths
+BASE_DIR = Path(__file__).resolve().parent
+BIN_ENGINE = BASE_DIR / "bin" / "bypass-engine"
+HTTP_PROXY_SCRIPT = BASE_DIR / "bypass_http_proxy.py"
+RUN_DIR = Path.home() / ".config" / "bypass"
+CONFIG_FILE = RUN_DIR / "config.json"
+PID_ENGINE_FILE = RUN_DIR / "engine.pid"
+PID_HTTP_FILE = RUN_DIR / "http.pid"
+
+DEFAULT_SOCKS_PORT = 1080
+DEFAULT_HTTP_PORT = 8080
+DEFAULT_LISTEN_IP = "127.0.0.1"
+
+# ANSI Colors
+class Colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    DIM = '\033[2m'
+    RESET = '\033[0m'
+
+def colorize(text, color):
+    if sys.stdout.isatty():
+        return f"{color}{text}{Colors.RESET}"
+    return text
+
+def ensure_dirs():
+    RUN_DIR.mkdir(parents=True, exist_ok=True)
+
+def is_pid_running(pid):
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+def read_pid(path):
+    if path.exists():
+        try:
+            val = int(path.read_text().strip())
+            if is_pid_running(val):
+                return val
+        except Exception:
+            pass
+    return None
+
+def write_pid(path, pid):
+    path.write_text(str(pid))
+
+def is_port_in_use(port, host="127.0.0.1"):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex((host, port)) == 0
+
+def ensure_engine_binary():
+    if not BIN_ENGINE.exists():
+        print(colorize("[*] Compiling bypass engine from source...", Colors.YELLOW))
+        build_script = BASE_DIR / "build.sh"
+        if build_script.exists():
+            res = subprocess.run(["bash", str(build_script)], cwd=str(BASE_DIR))
+            if res.returncode != 0:
+                print(colorize("[!] Failed to build bypass-engine!", Colors.RED))
+                sys.exit(1)
+        else:
+            print(colorize(f"[!] Engine binary not found at {BIN_ENGINE} and build.sh missing!", Colors.RED))
+            sys.exit(1)
+
+def cmd_start(args):
+    ensure_dirs()
+    ensure_engine_binary()
+
+    socks_port = getattr(args, "socks_port", DEFAULT_SOCKS_PORT)
+    http_port = getattr(args, "http_port", DEFAULT_HTTP_PORT)
+    listen_ip = getattr(args, "listen_ip", DEFAULT_LISTEN_IP)
+
+    engine_pid = read_pid(PID_ENGINE_FILE)
+    http_pid = read_pid(PID_HTTP_FILE)
+
+    if engine_pid and http_pid:
+        print(colorize("[!] Bypass is already running!", Colors.YELLOW))
+        cmd_status(args)
+        return
+
+    # Clean up stale pid files
+    if engine_pid and not http_pid:
+        try: os.kill(engine_pid, signal.SIGTERM)
+        except Exception: pass
+    if http_pid and not engine_pid:
+        try: os.kill(http_pid, signal.SIGTERM)
+        except Exception: pass
+
+    if is_port_in_use(socks_port, listen_ip):
+        print(colorize(f"[!] SOCKS5 port {socks_port} is already in use by another process!", Colors.RED))
+        return
+
+    if is_port_in_use(http_port, listen_ip):
+        print(colorize(f"[!] HTTP proxy port {http_port} is already in use by another process!", Colors.RED))
+        return
+
+    print(colorize("Starting Bypass Services...", Colors.BOLD))
+
+    # Native C DPI Bypass Engine (SOCKS5):
+    # -s 1: Split TLS record header at offset 1
+    # -o 1: Send 1 byte as Out-Of-Band TCP data (URG pointer) to desync FortiGate DPI state machine
+    engine_cmd = [
+        str(BIN_ENGINE),
+        "-i", listen_ip,
+        "-p", str(socks_port),
+        "-s", "1",
+        "-o", "1",
+        "-w", str(PID_ENGINE_FILE),
+        "-D"
+    ]
+
+    try:
+        res = subprocess.run(engine_cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            print(colorize(f"[!] Failed to start native engine: {res.stderr}", Colors.RED))
+            return
+    except Exception as e:
+        print(colorize(f"[!] Failed to launch engine: {e}", Colors.RED))
+        return
+
+    time.sleep(0.3)
+    engine_pid = read_pid(PID_ENGINE_FILE)
+    if not engine_pid:
+        print(colorize("[!] Engine process died immediately after starting!", Colors.RED))
+        return
+
+    print(colorize(f"  [+] SOCKS5 DPI Engine running on {listen_ip}:{socks_port} (PID: {engine_pid})", Colors.GREEN))
+
+    # HTTP to SOCKS5 Forwarder
+    http_proc = subprocess.Popen(
+        [
+            sys.executable,
+            str(HTTP_PROXY_SCRIPT),
+            "--listen-ip", listen_ip,
+            "--listen-port", str(http_port),
+            "--socks-host", listen_ip,
+            "--socks-port", str(socks_port),
+            "--pidfile", str(PID_HTTP_FILE)
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True
+    )
+    time.sleep(0.3)
+    http_pid = read_pid(PID_HTTP_FILE)
+    if not http_pid:
+        http_pid = http_proc.pid
+        write_pid(PID_HTTP_FILE, http_pid)
+
+    print(colorize(f"  [+] HTTP CONNECT Proxy running on {listen_ip}:{http_port} (PID: {http_pid})", Colors.GREEN))
+
+    config = {
+        "listen_ip": listen_ip,
+        "socks_port": socks_port,
+        "http_port": http_port,
+        "started_at": time.time()
+    }
+    CONFIG_FILE.write_text(json.dumps(config, indent=2))
+
+    print(colorize("\n[✓] Bypass is ACTIVE and ready!", Colors.BOLD + Colors.GREEN))
+    print(colorize("Usage tips:", Colors.CYAN))
+    print(f"  • Test blocked sites:    {colorize('bypass test', Colors.BOLD)}")
+    print(f"  • Run command via proxy: {colorize('bypass run <command>', Colors.BOLD)}")
+    print(f"  • Launch Firefox:        {colorize('bypass browser', Colors.BOLD)}")
+    print(f"  • Export env variables:  {colorize('eval $(bypass env)', Colors.BOLD)}")
+
+def cmd_stop(args):
+    engine_pid = read_pid(PID_ENGINE_FILE)
+    http_pid = read_pid(PID_HTTP_FILE)
+
+    stopped_any = False
+
+    if http_pid:
+        try:
+            os.kill(http_pid, signal.SIGTERM)
+            print(colorize(f"  [-] Stopped HTTP proxy (PID: {http_pid})", Colors.YELLOW))
+            stopped_any = True
+        except Exception:
+            pass
+        if PID_HTTP_FILE.exists():
+            PID_HTTP_FILE.unlink(missing_ok=True)
+
+    if engine_pid:
+        try:
+            os.kill(engine_pid, signal.SIGTERM)
+            print(colorize(f"  [-] Stopped SOCKS5 engine (PID: {engine_pid})", Colors.YELLOW))
+            stopped_any = True
+        except Exception:
+            pass
+        if PID_ENGINE_FILE.exists():
+            PID_ENGINE_FILE.unlink(missing_ok=True)
+
+    # Clean up leftover processes if any
+    subprocess.run(["pkill", "-f", "bypass-engine"], capture_output=True)
+    subprocess.run(["pkill", "-f", "bypass_http_proxy.py"], capture_output=True)
+
+    if PID_ENGINE_FILE.exists(): PID_ENGINE_FILE.unlink(missing_ok=True)
+    if PID_HTTP_FILE.exists(): PID_HTTP_FILE.unlink(missing_ok=True)
+
+    if stopped_any:
+        print(colorize("[✓] Bypass services successfully stopped.", Colors.GREEN))
+    else:
+        print(colorize("[*] No active bypass services were running.", Colors.DIM))
+
+def cmd_restart(args):
+    cmd_stop(args)
+    time.sleep(0.5)
+    cmd_start(args)
+
+def cmd_status(args):
+    engine_pid = read_pid(PID_ENGINE_FILE)
+    http_pid = read_pid(PID_HTTP_FILE)
+
+    config = {}
+    if CONFIG_FILE.exists():
+        try:
+            config = json.loads(CONFIG_FILE.read_text())
+        except Exception:
+            pass
+
+    socks_port = config.get("socks_port", DEFAULT_SOCKS_PORT)
+    http_port = config.get("http_port", DEFAULT_HTTP_PORT)
+    listen_ip = config.get("listen_ip", DEFAULT_LISTEN_IP)
+
+    print(colorize("--- Bypass Service Status ---", Colors.BOLD))
+    
+    if engine_pid:
+        print(f"  • SOCKS5 Engine: {colorize('ONLINE', Colors.GREEN)} (PID: {engine_pid}, Address: {listen_ip}:{socks_port})")
+    else:
+        print(f"  • SOCKS5 Engine: {colorize('OFFLINE', Colors.RED)}")
+
+    if http_pid:
+        print(f"  • HTTP Proxy:    {colorize('ONLINE', Colors.GREEN)} (PID: {http_pid}, Address: {listen_ip}:{http_port})")
+    else:
+        print(f"  • HTTP Proxy:    {colorize('OFFLINE', Colors.RED)}")
+
+    if engine_pid and http_pid:
+        uptime = int(time.time() - config.get("started_at", time.time()))
+        print(f"  • Uptime:        {uptime} seconds")
+        print(colorize("\nService is running normally. Run 'bypass test' to verify connectivity.", Colors.CYAN))
+    else:
+        print(colorize("\nService is stopped. Run 'bypass start' to enable.", Colors.YELLOW))
+
+def test_url_curl(url, proxy_url, timeout=12):
+    start = time.time()
+    cmd = [
+        "curl",
+        "-x", proxy_url,
+        "-s",
+        "-L",
+        "-m", str(timeout),
+        "--compressed",
+        "-H", "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
+        "-w", "%{http_code}\n",
+        "-o", "/dev/null",
+        url
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 2)
+        elapsed = round((time.time() - start) * 1000)
+        lines = res.stdout.strip().split("\n")
+        code = lines[0] if len(lines) > 0 and lines[0] else "000"
+        return res.returncode, code, elapsed
+    except subprocess.TimeoutExpired:
+        return 28, "TIMEOUT", int(timeout * 1000)
+    except Exception as e:
+        return -1, str(e), 0
+
+def cmd_test(args):
+    config = {}
+    if CONFIG_FILE.exists():
+        try:
+            config = json.loads(CONFIG_FILE.read_text())
+        except Exception:
+            pass
+
+    http_port = config.get("http_port", DEFAULT_HTTP_PORT)
+    socks_port = config.get("socks_port", DEFAULT_SOCKS_PORT)
+    listen_ip = config.get("listen_ip", DEFAULT_LISTEN_IP)
+
+    # Check if running
+    if not read_pid(PID_ENGINE_FILE) and not is_port_in_use(socks_port, listen_ip):
+        print(colorize("[*] Bypass is not running. Starting temporarily for test...", Colors.YELLOW))
+        cmd_start(args)
+
+    targets = args.urls if args.urls else [
+        "https://nyaa.si",
+        "https://fitgirl-repacks.site",
+        "https://1337x.to",
+        "https://thepiratebay.org",
+        "https://rutracker.org",
+        "https://www.reddit.com",
+        "https://github.com"
+    ]
+
+    proxy_url = f"http://{listen_ip}:{http_port}"
+    socks_url = f"socks5h://{listen_ip}:{socks_port}"
+
+    print(colorize(f"Testing connectivity through Bypass Proxy ({proxy_url} & {socks_url})...\n", Colors.BOLD))
+    print(f"{'Target Website':<32} {'HTTP Code':<16} {'Latency':<10} {'Result'}")
+    print("-" * 72)
+
+    for target in targets:
+        ret, code, latency = test_url_curl(target, socks_url, timeout=args.timeout)
+        
+        if ret == 0 and (code.startswith("2") or code.startswith("3") or code == "403"):
+            if code == "403":
+                status_str = colorize(f"{code} (Origin/WAF)", Colors.YELLOW)
+                res_str = colorize("UNBLOCKED (DPI Bypassed)", Colors.GREEN)
+            else:
+                status_str = colorize(f"{code} OK", Colors.GREEN)
+                res_str = colorize("UNBLOCKED (Success)", Colors.BOLD + Colors.GREEN)
+        elif code == "TIMEOUT":
+            status_str = colorize("TIMEOUT", Colors.RED)
+            res_str = colorize("FAILED", Colors.RED)
+        else:
+            status_str = colorize(f"Code {code}", Colors.RED)
+            res_str = colorize(f"Error ({ret})", Colors.RED)
+
+        print(f"{target:<32} {status_str:<25} {latency:>5}ms   {res_str}")
+
+    print("\n" + colorize("[✓] Verification test completed.", Colors.BOLD + Colors.GREEN))
+
+def cmd_run(args):
+    if not args.command:
+        print(colorize("Usage: bypass run <command> [args...]", Colors.RED))
+        sys.exit(1)
+
+    config = {}
+    if CONFIG_FILE.exists():
+        try:
+            config = json.loads(CONFIG_FILE.read_text())
+        except Exception:
+            pass
+
+    http_port = config.get("http_port", DEFAULT_HTTP_PORT)
+    socks_port = config.get("socks_port", DEFAULT_SOCKS_PORT)
+    listen_ip = config.get("listen_ip", DEFAULT_LISTEN_IP)
+
+    # Ensure proxy is running
+    if not read_pid(PID_ENGINE_FILE) and not is_port_in_use(socks_port, listen_ip):
+        print(colorize("[*] Starting bypass daemon...", Colors.YELLOW))
+        cmd_start(args)
+
+    env = os.environ.copy()
+    proxy_http = f"http://{listen_ip}:{http_port}"
+    proxy_socks = f"socks5h://{listen_ip}:{socks_port}"
+
+    env["http_proxy"] = proxy_http
+    env["https_proxy"] = proxy_http
+    env["HTTP_PROXY"] = proxy_http
+    env["HTTPS_PROXY"] = proxy_http
+    env["all_proxy"] = proxy_http
+    env["ALL_PROXY"] = proxy_http
+
+    # Execute wrapped process
+    try:
+        p = subprocess.run(args.command, env=env)
+        sys.exit(p.returncode)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except FileNotFoundError:
+        print(colorize(f"Command not found: {args.command[0]}", Colors.RED))
+        sys.exit(127)
+
+def cmd_env(args):
+    config = {}
+    if CONFIG_FILE.exists():
+        try:
+            config = json.loads(CONFIG_FILE.read_text())
+        except Exception:
+            pass
+    http_port = config.get("http_port", DEFAULT_HTTP_PORT)
+    socks_port = config.get("socks_port", DEFAULT_SOCKS_PORT)
+    listen_ip = config.get("listen_ip", DEFAULT_LISTEN_IP)
+
+    print(f"export http_proxy=http://{listen_ip}:{http_port} https_proxy=http://{listen_ip}:{http_port} HTTP_PROXY=http://{listen_ip}:{http_port} HTTPS_PROXY=http://{listen_ip}:{http_port} all_proxy=http://{listen_ip}:{http_port} ALL_PROXY=http://{listen_ip}:{http_port}")
+
+def cmd_unenv(args):
+    print("unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY")
+
+def cmd_browser(args):
+    config = {}
+    if CONFIG_FILE.exists():
+        try:
+            config = json.loads(CONFIG_FILE.read_text())
+        except Exception:
+            pass
+
+    socks_port = config.get("socks_port", DEFAULT_SOCKS_PORT)
+    listen_ip = config.get("listen_ip", DEFAULT_LISTEN_IP)
+
+    if not read_pid(PID_ENGINE_FILE) and not is_port_in_use(socks_port, listen_ip):
+        print(colorize("[*] Starting bypass services...", Colors.YELLOW))
+        cmd_start(args)
+
+    # Firefox profile directory
+    ff_profile = RUN_DIR / "firefox_profile"
+    ff_profile.mkdir(parents=True, exist_ok=True)
+    
+    # Configure user.js for isolated proxy
+    user_js = ff_profile / "user.js"
+    user_js.write_text(f"""
+user_pref("network.proxy.type", 1);
+user_pref("network.proxy.socks", "{listen_ip}");
+user_pref("network.proxy.socks_port", {socks_port});
+user_pref("network.proxy.socks_version", 5);
+user_pref("network.proxy.socks_remote_dns", true);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.startup.homepage", "https://nyaa.si");
+""")
+
+    print(colorize("\n[+] Configured isolated bypass profile for Firefox.", Colors.GREEN))
+    print(colorize(f"[+] Proxy: SOCKS5 {listen_ip}:{socks_port} (Remote DNS enabled)", Colors.CYAN))
+
+    urls = args.urls if args.urls else ["https://nyaa.si", "https://fitgirl-repacks.site"]
+
+    try:
+        subprocess.Popen(
+            ["firefox", "--profile", str(ff_profile), "--no-remote"] + urls,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        print(colorize(f"[✓] Launched Firefox with unblocked sites: {' '.join(urls)}", Colors.BOLD + Colors.GREEN))
+    except FileNotFoundError:
+        print(colorize("[!] Firefox binary not found. For Chrome / Chromium, run:", Colors.YELLOW))
+        print(f"    google-chrome --proxy-server=\"socks5://{listen_ip}:{socks_port}\" {' '.join(urls)}")
+
+def cmd_service(args):
+    action = args.action
+    service_dir = Path.home() / ".config" / "systemd" / "user"
+    service_file = service_dir / "bypass.service"
+
+    bypass_bin = BASE_DIR / "bypass"
+
+    if action in ["install", "enable"]:
+        service_dir.mkdir(parents=True, exist_ok=True)
+        content = f"""[Unit]
+Description=DPI Bypass Proxy Service
+After=network.target
+
+[Service]
+Type=forking
+ExecStart={bypass_bin} start
+ExecStop={bypass_bin} stop
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+"""
+        service_file.write_text(content)
+        subprocess.run(["systemctl", "--user", "daemon-reload"])
+        subprocess.run(["systemctl", "--user", "enable", "bypass.service"])
+        subprocess.run(["systemctl", "--user", "start", "bypass.service"])
+        print(colorize(f"[✓] Installed and enabled systemd user service: {service_file}", Colors.GREEN))
+        print(colorize("It is running now and will automatically start on every login!", Colors.CYAN))
+
+    elif action in ["uninstall", "disable"]:
+        subprocess.run(["systemctl", "--user", "stop", "bypass.service"], capture_output=True)
+        subprocess.run(["systemctl", "--user", "disable", "bypass.service"], capture_output=True)
+        service_file.unlink(missing_ok=True)
+        subprocess.run(["systemctl", "--user", "daemon-reload"])
+        print(colorize("[✓] Uninstalled systemd user service.", Colors.GREEN))
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="bypass",
+        description="High-Performance Low-Level DPI Bypass Suite (Nyaa, FitGirl, Torrent & Educational Sites)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  bypass start                    # Start background DPI bypass services
+  bypass status                   # Show status and port bindings
+  bypass test                     # Test access to nyaa.si, fitgirl, etc.
+  bypass run curl https://nyaa.si # Run curl wrapped with proxy env
+  bypass browser                  # Launch Firefox through bypass
+  bypass service install          # Enable auto-start on user login
+  bypass stop                     # Stop services
+"""
+    )
+
+    subparsers = parser.add_subparsers(dest="subcommand")
+
+    # start
+    p_start = subparsers.add_parser("start", help="Start background bypass daemon")
+    p_start.add_argument("--socks-port", type=int, default=DEFAULT_SOCKS_PORT, help=f"SOCKS5 port (default: {DEFAULT_SOCKS_PORT})")
+    p_start.add_argument("--http-port", type=int, default=DEFAULT_HTTP_PORT, help=f"HTTP proxy port (default: {DEFAULT_HTTP_PORT})")
+    p_start.add_argument("--listen-ip", default=DEFAULT_LISTEN_IP, help=f"Listening IP (default: {DEFAULT_LISTEN_IP})")
+    p_start.set_defaults(func=cmd_start)
+
+    # stop
+    p_stop = subparsers.add_parser("stop", help="Stop bypass daemon")
+    p_stop.set_defaults(func=cmd_stop)
+
+    # restart
+    p_restart = subparsers.add_parser("restart", help="Restart bypass daemon")
+    p_restart.add_argument("--socks-port", type=int, default=DEFAULT_SOCKS_PORT)
+    p_restart.add_argument("--http-port", type=int, default=DEFAULT_HTTP_PORT)
+    p_restart.add_argument("--listen-ip", default=DEFAULT_LISTEN_IP)
+    p_restart.set_defaults(func=cmd_restart)
+
+    # status
+    p_status = subparsers.add_parser("status", help="Show status of bypass daemon")
+    p_status.set_defaults(func=cmd_status)
+
+    # test
+    p_test = subparsers.add_parser("test", help="Test reachability of blocked websites")
+    p_test.add_argument("urls", nargs="*", help="Optional URLs to test")
+    p_test.add_argument("--timeout", type=int, default=12, help="Timeout in seconds (default: 12)")
+    p_test.add_argument("--socks-port", type=int, default=DEFAULT_SOCKS_PORT)
+    p_test.add_argument("--http-port", type=int, default=DEFAULT_HTTP_PORT)
+    p_test.add_argument("--listen-ip", default=DEFAULT_LISTEN_IP)
+    p_test.set_defaults(func=cmd_test)
+
+    # run
+    p_run = subparsers.add_parser("run", help="Run any command with proxy environment variables set")
+    p_run.add_argument("command", nargs=argparse.REMAINDER, help="Command to run")
+    p_run.add_argument("--socks-port", type=int, default=DEFAULT_SOCKS_PORT)
+    p_run.add_argument("--http-port", type=int, default=DEFAULT_HTTP_PORT)
+    p_run.add_argument("--listen-ip", default=DEFAULT_LISTEN_IP)
+    p_run.set_defaults(func=cmd_run)
+
+    # env
+    p_env = subparsers.add_parser("env", help="Print export commands for terminal session")
+    p_env.set_defaults(func=cmd_env)
+
+    # unenv
+    p_unenv = subparsers.add_parser("unenv", help="Print unset commands for terminal session")
+    p_unenv.set_defaults(func=cmd_unenv)
+
+    # browser
+    p_browser = subparsers.add_parser("browser", help="Launch browser with bypass configured")
+    p_browser.add_argument("urls", nargs="*", help="URLs to open")
+    p_browser.add_argument("--socks-port", type=int, default=DEFAULT_SOCKS_PORT)
+    p_browser.add_argument("--http-port", type=int, default=DEFAULT_HTTP_PORT)
+    p_browser.add_argument("--listen-ip", default=DEFAULT_LISTEN_IP)
+    p_browser.set_defaults(func=cmd_browser)
+
+    # service
+    p_svc = subparsers.add_parser("service", help="Manage systemd user service")
+    p_svc.add_argument("action", choices=["install", "uninstall", "enable", "disable"], help="Service action")
+    p_svc.set_defaults(func=cmd_service)
+
+    args = parser.parse_args()
+    if not args.subcommand:
+        parser.print_help()
+        sys.exit(0)
+
+    args.func(args)
+
+if __name__ == "__main__":
+    main()
