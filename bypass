@@ -122,14 +122,18 @@ def cmd_start(args):
     print(colorize("Starting Bypass Services...", Colors.BOLD))
 
     # Native C DPI Bypass Engine (SOCKS5):
-    # -s 1: Split TLS record header at offset 1
-    # -o 1: Send 1 byte as Out-Of-Band TCP data (URG pointer) to desync FortiGate DPI state machine
+    # -K t -s 1 -o 1: Desynchronize TLS ClientHello with Out-Of-Band URG flag for HTTPS (port 443)
+    # -A n -K h -o 1+h: Desynchronize HTTP Host header with Out-Of-Band URG flag for plain HTTP (port 80)
     engine_cmd = [
         str(BIN_ENGINE),
         "-i", listen_ip,
         "-p", str(socks_port),
+        "-K", "t",
         "-s", "1",
         "-o", "1",
+        "-A", "n",
+        "-K", "h",
+        "-o", "1+h",
         "-w", str(PID_ENGINE_FILE),
         "-D"
     ]
@@ -433,6 +437,8 @@ user_pref("network.proxy.socks", "{listen_ip}");
 user_pref("network.proxy.socks_port", {socks_port});
 user_pref("network.proxy.socks_version", 5);
 user_pref("network.proxy.socks_remote_dns", true);
+user_pref("network.proxy.share_proxy_settings", true);
+user_pref("dom.security.https_only_mode", true);
 user_pref("browser.shell.checkDefaultBrowser", false);
 user_pref("browser.startup.homepage", "https://nyaa.si");
 """)
