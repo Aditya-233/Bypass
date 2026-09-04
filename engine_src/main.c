@@ -158,6 +158,7 @@ const struct option options[] = {
     {"cache-file",    1, 0, 'y'},
     {"proto",         1, 0, 'K'},
     {"hosts",         1, 0, 'H'},
+    {"ex-hosts",      1, 0, 'z'},
     {"pf",            1, 0, 'V'},
     {"round",         1, 0, 'R'},
     {"split",         1, 0, 's'},
@@ -675,6 +676,7 @@ void clear_params(char *line, char **argv)
         free(dp->fake_data.data);
         free(dp->fake_sni_list);
         mem_destroy(dp->hosts);
+        mem_destroy(dp->ex_hosts);
         mem_destroy(dp->ipset);
         
         struct desync_params *t = dp;
@@ -1001,6 +1003,29 @@ int parse_args(int argc, char **argv)
             }
             *d = data;
             if (parse_hosts(dp->hosts, data, size)) {
+                uniperror("parse_hosts");
+                return -1;
+            }
+            break;
+            
+        case 'z':
+            if (!dp->ex_hosts && 
+                    !(dp->ex_hosts = mem_pool(MF_STATIC, CMP_HOST))) {
+                return -1;
+            }
+            ssize_t esize = 0;
+            char *edata = ftob(optarg, &esize);
+            if (!edata) {
+                uniperror("read/parse");
+                invalid = 1;
+                continue;
+            }
+            char **ed = add((void *)&params.need_free, &params.need_free_n, sizeof(edata));
+            if (!ed) {
+                return -1;
+            }
+            *ed = edata;
+            if (parse_hosts(dp->ex_hosts, edata, esize)) {
                 uniperror("parse_hosts");
                 return -1;
             }

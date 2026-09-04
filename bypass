@@ -19,6 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent
 BIN_ENGINE = BASE_DIR / "bin" / "bypass-engine"
 HTTP_PROXY_SCRIPT = BASE_DIR / "bypass_http_proxy.py"
 RUN_DIR = Path.home() / ".config" / "bypass"
+WHITELIST_FILE = BASE_DIR / "speed_whitelist.txt"
 CONFIG_FILE = RUN_DIR / "config.json"
 PID_ENGINE_FILE = RUN_DIR / "engine.pid"
 PID_HTTP_FILE = RUN_DIR / "http.pid"
@@ -122,18 +123,22 @@ def cmd_start(args):
     print(colorize("Starting Bypass Services...", Colors.BOLD))
 
     # Native C DPI Bypass Engine (SOCKS5):
-    # -K t -s 1 -o 1: Desynchronize TLS ClientHello with Out-Of-Band URG flag for HTTPS (port 443)
-    # -A n -K h -o 1+h: Desynchronize HTTP Host header with Out-Of-Band URG flag for plain HTTP (port 80)
+    # -K t --ex-hosts <file> -s 1 -o 1: Desynchronize TLS ClientHello with Out-Of-Band URG for blocked HTTPS (port 443)
+    # -A n -K h --ex-hosts <file> -o 1+h: Desynchronize HTTP Host header with Out-Of-Band URG for blocked HTTP (port 80)
+    # -A n: Fallback passthrough for whitelisted speedtest/CDN domains (no desync -> native line speed)
     engine_cmd = [
         str(BIN_ENGINE),
         "-i", listen_ip,
         "-p", str(socks_port),
         "-K", "t",
+        "--ex-hosts", str(WHITELIST_FILE),
         "-s", "1",
         "-o", "1",
         "-A", "n",
         "-K", "h",
+        "--ex-hosts", str(WHITELIST_FILE),
         "-o", "1+h",
+        "-A", "n",
         "-w", str(PID_ENGINE_FILE),
         "-D"
     ]
@@ -438,6 +443,7 @@ user_pref("network.proxy.socks_port", {socks_port});
 user_pref("network.proxy.socks_version", 5);
 user_pref("network.proxy.socks_remote_dns", true);
 user_pref("network.proxy.share_proxy_settings", true);
+user_pref("network.proxy.no_proxies_on", "localhost, 127.0.0.1, fast.com, .fast.com, nflxvideo.net, .nflxvideo.net, netflix.com, .netflix.com, nflximg.net, .nflximg.net, nflxext.com, .nflxext.com, speedtest.net, .speedtest.net, ooklaserver.net, .ooklaserver.net");
 user_pref("dom.security.https_only_mode", true);
 user_pref("browser.shell.checkDefaultBrowser", false);
 user_pref("browser.startup.homepage", "https://nyaa.si");

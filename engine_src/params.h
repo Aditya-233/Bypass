@@ -117,6 +117,7 @@ struct desync_params {
     short detect;
     short auto_level;
     struct mphdr *hosts;
+    struct mphdr *ex_hosts;
     struct mphdr *ipset;
     uint16_t pf[2];
     int rounds[2];
