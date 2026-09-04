@@ -130,6 +130,8 @@ def cmd_start(args):
         str(BIN_ENGINE),
         "-i", listen_ip,
         "-p", str(socks_port),
+        "-X",
+        "-b", "65536",
         "-K", "t",
         "--ex-hosts", str(WHITELIST_FILE),
         "-s", "1",
@@ -275,13 +277,14 @@ def cmd_status(args):
     else:
         print(colorize("\nService is stopped. Run 'bypass start' to enable.", Colors.YELLOW))
 
-def test_url_curl(url, proxy_url, timeout=12):
+def test_url_curl(url, proxy_url, timeout=15):
     start = time.time()
     cmd = [
         "curl",
         "-x", proxy_url,
         "-s",
         "-L",
+        "--connect-timeout", "5",
         "-m", str(timeout),
         "--retry", "2",
         "--retry-delay", "1",
@@ -445,6 +448,13 @@ user_pref("network.proxy.socks_remote_dns", true);
 user_pref("network.proxy.share_proxy_settings", true);
 user_pref("network.proxy.no_proxies_on", "localhost, 127.0.0.1, fast.com, .fast.com, nflxvideo.net, .nflxvideo.net, netflix.com, .netflix.com, nflximg.net, .nflximg.net, nflxext.com, .nflxext.com, speedtest.net, .speedtest.net, ooklaserver.net, .ooklaserver.net");
 user_pref("dom.security.https_only_mode", true);
+user_pref("network.http.max-persistent-connections-per-server", 16);
+user_pref("network.http.max-persistent-connections-per-proxy", 64);
+user_pref("network.ssl_tokens_cache_enabled", true);
+user_pref("network.dnsCacheExpiration", 3600);
+user_pref("network.dnsCacheEntries", 1000);
+user_pref("browser.cache.memory.enable", true);
+user_pref("browser.cache.memory.capacity", 524288);
 user_pref("browser.shell.checkDefaultBrowser", false);
 user_pref("browser.startup.homepage", "https://nyaa.si");
 """)

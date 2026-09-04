@@ -124,9 +124,63 @@ static inline int nb_socket(int domain, int type)
 }
 
 
+#define DNS_CACHE_SIZE 1024
+#define DNS_CACHE_TTL 300 // 5 minutes
+
+struct dns_cache_entry {
+    char host[256];
+    union sockaddr_u addr;
+    time_t expires;
+    int type;
+};
+
+static struct dns_cache_entry g_dns_cache[DNS_CACHE_SIZE];
+
+static int dns_cache_lookup(const char *host, int type, union sockaddr_u *addr) {
+    time_t now = time(NULL);
+    for (int i = 0; i < DNS_CACHE_SIZE; i++) {
+        if (g_dns_cache[i].host[0] && strcmp(g_dns_cache[i].host, host) == 0 && g_dns_cache[i].type == type) {
+            if (g_dns_cache[i].expires > now) {
+                *addr = g_dns_cache[i].addr;
+                return 1;
+            }
+            g_dns_cache[i].host[0] = 0; // Expired
+        }
+    }
+    return 0;
+}
+
+static void dns_cache_store(const char *host, int type, const union sockaddr_u *addr) {
+    time_t now = time(NULL);
+    int target_idx = -1;
+    for (int i = 0; i < DNS_CACHE_SIZE; i++) {
+        if (!g_dns_cache[i].host[0] || g_dns_cache[i].expires <= now) {
+            target_idx = i;
+            break;
+        }
+    }
+    if (target_idx == -1) {
+        static unsigned int counter = 0;
+        target_idx = (counter++) % DNS_CACHE_SIZE;
+    }
+    strncpy(g_dns_cache[target_idx].host, host, sizeof(g_dns_cache[target_idx].host) - 1);
+    g_dns_cache[target_idx].host[sizeof(g_dns_cache[target_idx].host) - 1] = 0;
+    g_dns_cache[target_idx].addr = *addr;
+    g_dns_cache[target_idx].expires = now + DNS_CACHE_TTL;
+    g_dns_cache[target_idx].type = type;
+}
+
 static int resolve(const char *chost, int len, 
         union sockaddr_u *addr, int type) 
 {
+    char host[len + 1];
+    host[len] = 0;
+    memcpy(host, chost, len);
+    
+    if (dns_cache_lookup(host, type, addr)) {
+        return 0;
+    }
+    
     struct addrinfo hints = {0}, *res = 0;
     
     hints.ai_socktype = type;
@@ -134,10 +188,6 @@ static int resolve(const char *chost, int len,
     if (!params.resolve)
         hints.ai_flags |= AI_NUMERICHOST;
     hints.ai_family = params.ipv6 ? AF_UNSPEC : AF_INET;
-    
-    char host[len + 1];
-    host[len] = 0;
-    memcpy(host, chost, len);
     
     LOG(LOG_S, "resolve: %s\n", host);
     
@@ -147,6 +197,7 @@ static int resolve(const char *chost, int len,
     memcpy(addr, res->ai_addr, SA_SIZE(res->ai_addr));
     freeaddrinfo(res);
     
+    dns_cache_store(host, type, addr);
     return 0;
 }
 
