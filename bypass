@@ -383,14 +383,16 @@ def cmd_run(args):
 
     env = os.environ.copy()
     proxy_http = f"http://{listen_ip}:{http_port}"
-    proxy_socks = f"socks5h://{listen_ip}:{socks_port}"
+    proxy_socks = f"socks5://{listen_ip}:{socks_port}"
 
     env["http_proxy"] = proxy_http
     env["https_proxy"] = proxy_http
     env["HTTP_PROXY"] = proxy_http
     env["HTTPS_PROXY"] = proxy_http
-    env["all_proxy"] = proxy_http
-    env["ALL_PROXY"] = proxy_http
+    env["all_proxy"] = proxy_socks
+    env["ALL_PROXY"] = proxy_socks
+    env["socks_proxy"] = proxy_socks
+    env["SOCKS_PROXY"] = proxy_socks
 
     # Execute wrapped process
     try:
@@ -413,10 +415,10 @@ def cmd_env(args):
     socks_port = config.get("socks_port", DEFAULT_SOCKS_PORT)
     listen_ip = config.get("listen_ip", DEFAULT_LISTEN_IP)
 
-    print(f"export http_proxy=http://{listen_ip}:{http_port} https_proxy=http://{listen_ip}:{http_port} HTTP_PROXY=http://{listen_ip}:{http_port} HTTPS_PROXY=http://{listen_ip}:{http_port} all_proxy=http://{listen_ip}:{http_port} ALL_PROXY=http://{listen_ip}:{http_port}")
+    print(f"export http_proxy=http://{listen_ip}:{http_port} https_proxy=http://{listen_ip}:{http_port} HTTP_PROXY=http://{listen_ip}:{http_port} HTTPS_PROXY=http://{listen_ip}:{http_port} all_proxy=socks5h://{listen_ip}:{socks_port} ALL_PROXY=socks5h://{listen_ip}:{socks_port} socks_proxy=socks5h://{listen_ip}:{socks_port} SOCKS_PROXY=socks5h://{listen_ip}:{socks_port}")
 
 def cmd_unenv(args):
-    print("unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY")
+    print("unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY socks_proxy SOCKS_PROXY")
 
 def cmd_browser(args):
     config = {}

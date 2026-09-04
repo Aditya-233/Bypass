@@ -48,7 +48,9 @@ def socks5_connect(socks_host, socks_port, dest_host, dest_port):
     
     return s
 
-def forward_pipe(src, dst):
+import select
+
+def pipe_data(src, dst):
     try:
         while True:
             data = src.recv(BUFFER_SIZE)
@@ -62,11 +64,24 @@ def forward_pipe(src, dst):
             dst.shutdown(socket.SHUT_WR)
         except Exception:
             pass
-        try:
-            src.close()
-            dst.close()
-        except Exception:
-            pass
+
+def bridge_sockets(sock1, sock2):
+    sock1.setblocking(True)
+    sock2.setblocking(True)
+    t1 = threading.Thread(target=pipe_data, args=(sock1, sock2), daemon=True)
+    t2 = threading.Thread(target=pipe_data, args=(sock2, sock1), daemon=True)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    try:
+        sock1.close()
+    except Exception:
+        pass
+    try:
+        sock2.close()
+    except Exception:
+        pass
 
 def handle_client(client_sock, socks_host, socks_port):
     try:
@@ -90,6 +105,7 @@ def handle_client(client_sock, socks_host, socks_port):
             return
 
         method, target = parts[0].upper(), parts[1]
+        print(f"[HTTP-PROXY] {method} {target}", file=sys.stderr, flush=True)
 
         if method == "CONNECT":
             # HTTPS Tunneling
@@ -111,10 +127,7 @@ def handle_client(client_sock, socks_host, socks_port):
             if rest:
                 remote_sock.sendall(rest)
 
-            t1 = threading.Thread(target=forward_pipe, args=(client_sock, remote_sock), daemon=True)
-            t2 = threading.Thread(target=forward_pipe, args=(remote_sock, client_sock), daemon=True)
-            t1.start()
-            t2.start()
+            bridge_sockets(client_sock, remote_sock)
 
         else:
             # Plain HTTP Proxying
@@ -137,12 +150,21 @@ def handle_client(client_sock, socks_host, socks_port):
                             host = h_val
                         break
 
+            if (not host or host in ("127.0.0.1", "localhost")) and (b"/announce" in req_data or b"/scrape" in req_data):
+                host = "nyaa.tracker.wf"
+                port = 7777
+
             if not host:
                 client_sock.close()
                 return
 
             try:
-                remote_sock = socks5_connect(socks_host, socks_port, host, port)
+                if b"/announce" in req_data or b"/scrape" in req_data:
+                    remote_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    remote_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    remote_sock.connect((host, port))
+                else:
+                    remote_sock = socks5_connect(socks_host, socks_port, host, port)
             except Exception as e:
                 client_sock.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n" + str(e).encode())
                 client_sock.close()
@@ -155,12 +177,16 @@ def handle_client(client_sock, socks_host, socks_port):
                     new_headers += l + b"\r\n"
             new_headers += b"\r\n" + rest
 
+            if b"/announce" in req_data or b"/scrape" in req_data:
+                # Desync FortiGate DPI by sending first byte with TCP MSG_OOB!
+                try:
+                    remote_sock.send(new_headers[:1], socket.MSG_OOB)
+                except Exception:
+                    pass
+
             remote_sock.sendall(new_headers)
 
-            t1 = threading.Thread(target=forward_pipe, args=(client_sock, remote_sock), daemon=True)
-            t2 = threading.Thread(target=forward_pipe, args=(remote_sock, client_sock), daemon=True)
-            t1.start()
-            t2.start()
+            bridge_sockets(client_sock, remote_sock)
 
     except Exception:
         try:
