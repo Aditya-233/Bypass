@@ -16,7 +16,12 @@ if ! command -v python3 &>/dev/null; then
     exit 1
 fi
 
-# 2. Setup engine binary
+# 2. Ensure executable permissions on bundled scripts and binaries
+chmod +x "${SCRIPT_DIR}/bypass" "${SCRIPT_DIR}/bypass_http_proxy.py" 2>/dev/null || true
+[[ -f "${BIN_DIR}/bypass-engine" ]] && chmod +x "${BIN_DIR}/bypass-engine" 2>/dev/null || true
+[[ -f "${SCRIPT_DIR}/build.sh" ]] && chmod +x "${SCRIPT_DIR}/build.sh" 2>/dev/null || true
+
+# 3. Setup engine binary
 if [[ -x "${BIN_DIR}/bypass-engine" ]]; then
     echo "[✓] Using pre-compiled native bypass-engine."
 elif [[ -f "${SCRIPT_DIR}/build.sh" ]] && command -v gcc &>/dev/null; then
@@ -25,11 +30,6 @@ elif [[ -f "${SCRIPT_DIR}/build.sh" ]] && command -v gcc &>/dev/null; then
 else
     echo "[-] Warning: ${BIN_DIR}/bypass-engine not found and gcc is unavailable."
 fi
-
-# 3. Make CLI scripts executable
-chmod +x "${SCRIPT_DIR}/bypass"
-chmod +x "${SCRIPT_DIR}/bypass_http_proxy.py"
-[[ -f "${BIN_DIR}/bypass-engine" ]] && chmod +x "${BIN_DIR}/bypass-engine"
 
 # 4. Create symlink in ~/.local/bin
 mkdir -p "${HOME}/.local/bin"
