@@ -1,0 +1,37 @@
+[
+  {
+    "directory": "/home/aditya/Desktop/Programing/Projects/Bypass",
+    "command": "gcc -std=c99 -O2 -Wall -Wextra -Wno-unused-parameter -D_DEFAULT_SOURCE -Iengine_src -c engine_src/packets.c",
+    "file": "engine_src/packets.c"
+  },
+  {
+    "directory": "/home/aditya/Desktop/Programing/Projects/Bypass",
+    "command": "gcc -std=c99 -O2 -Wall -Wextra -Wno-unused-parameter -D_DEFAULT_SOURCE -Iengine_src -c engine_src/main.c",
+    "file": "engine_src/main.c"
+  },
+  {
+    "directory": "/home/aditya/Desktop/Programing/Projects/Bypass",
+    "command": "gcc -std=c99 -O2 -Wall -Wextra -Wno-unused-parameter -D_DEFAULT_SOURCE -Iengine_src -c engine_src/conev.c",
+    "file": "engine_src/conev.c"
+  },
+  {
+    "directory": "/home/aditya/Desktop/Programing/Projects/Bypass",
+    "command": "gcc -std=c99 -O2 -Wall -Wextra -Wno-unused-parameter -D_DEFAULT_SOURCE -Iengine_src -c engine_src/proxy.c",
+    "file": "engine_src/proxy.c"
+  },
+  {
+    "directory": "/home/aditya/Desktop/Programing/Projects/Bypass",
+    "command": "gcc -std=c99 -O2 -Wall -Wextra -Wno-unused-parameter -D_DEFAULT_SOURCE -Iengine_src -c engine_src/desync.c",
+    "file": "engine_src/desync.c"
+  },
+  {
+    "directory": "/home/aditya/Desktop/Programing/Projects/Bypass",
+    "command": "gcc -std=c99 -O2 -Wall -Wextra -Wno-unused-parameter -D_DEFAULT_SOURCE -Iengine_src -c engine_src/mpool.c",
+    "file": "engine_src/mpool.c"
+  },
+  {
+    "directory": "/home/aditya/Desktop/Programing/Projects/Bypass",
+    "command": "gcc -std=c99 -O2 -Wall -Wextra -Wno-unused-parameter -D_DEFAULT_SOURCE -Iengine_src -c engine_src/extend.c",
+    "file": "engine_src/extend.c"
+  }
+]

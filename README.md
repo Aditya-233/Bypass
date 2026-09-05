@@ -1,5 +1,11 @@
 # Bypass - Low-Level DPI Evasion & Censorship Circumvention Suite
 
+[![CI](https://github.com/Aditya-233/Bypass/actions/workflows/ci.yml/badge.svg)](https://github.com/Aditya-233/Bypass/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](https://www.kernel.org)
+[![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org)
+[![C Standard](https://img.shields.io/badge/c-C99-green.svg)](https://en.wikipedia.org/wiki/C99)
+
 A lightweight, high-performance network tool designed to bypass middlebox Deep Packet Inspection (DPI) firewalls (such as **Fortinet FortiGate**, enterprise UTMs, and Indian ISP filters) to restore access to blocked educational, open-source, and media resources including `nyaa.si`, `fitgirl-repacks.site`, `1337x.to`, `rutracker.org`, and others.
 
 ---
@@ -47,11 +53,12 @@ The suite provides a dual-proxy architecture running in user space (no root/sudo
 Run the automated build and installation script:
 
 ```bash
-cd /home/aditya/bypass
+git clone https://github.com/Aditya-233/Bypass.git
+cd Bypass
 ./install.sh
 ```
 
-This compiles `bin/bypass-engine` using `gcc` and creates a symlink at `~/.local/bin/bypass` (which is already in `$PATH`).
+This compiles `bin/bypass-engine` using `gcc` and creates a symlink at `~/.local/bin/bypass`.
 
 ---
 
@@ -158,5 +165,5 @@ bypass service uninstall
 
 Run unit and integration tests:
 ```bash
-python3 /home/aditya/bypass/tests/test_bypass.py
+python3 tests/test_bypass.py
 ```

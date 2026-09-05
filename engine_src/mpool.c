@@ -184,7 +184,7 @@ void dump_cache(struct mphdr *hdr, FILE *out, struct desync_params *dp)
 
 void load_cache(struct mphdr *hdr, FILE *in, struct desync_params *dp)
 {
-    for (int i = 0; ; i++) {
+    for (;;) {
         char addr_str[INET6_ADDRSTRLEN] = { 0 };
         char host[256] = { 0 };
         

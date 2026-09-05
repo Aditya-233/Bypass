@@ -149,7 +149,7 @@ void buff_push(struct poolhd *pool, struct buffer *buff);
 
 void buff_destroy(struct buffer *root);
 
-static struct buffer *buff_ppop(struct poolhd *pool, size_t size)
+static inline struct buffer *buff_ppop(struct poolhd *pool, size_t size)
 {
     struct buffer *b = buff_pop(pool, size);
     if (b) buff_push(pool, b);

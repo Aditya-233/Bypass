@@ -106,6 +106,8 @@ static char *alloc_pktd(size_t n)
 #define alloc_pktd(n) malloc(n)
 #endif
 
+static long gen_offset(long pos, int flag,
+        const char *buffer, size_t n, long lp, struct proto_info *info);
 
 static struct packet get_tcp_fake(const char *buffer, ssize_t n,
         struct proto_info *info, const struct desync_params *opt)
@@ -201,7 +203,6 @@ static ssize_t send_fake(struct eval *val, const char *buffer,
         uniperror("pipe");
         return -1;
     }
-    size_t ms = pos > pkt.size ? pos : pkt.size;
     ssize_t ret = -1;
     
     val->restore_orig = buffer;

@@ -181,6 +181,12 @@ static int on_socks_conn(struct poolhd *pool, struct eval *val, int t)
 }
 
 
+#ifdef __linux__
+static int protect(int conn_fd, const char *path);
+#else
+#define protect(fd, path) 0
+#endif
+
 int socket_mod(int fd)
 {
     if (params.custom_ttl) {

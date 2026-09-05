@@ -36,7 +36,7 @@
     #endif
 #endif
 
-static int unie(int e)
+static inline int unie(int e)
 {
     #ifdef _WIN32
     switch (e) {

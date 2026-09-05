@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build-and-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies and linters
+        run: |
+          pip install ruff
+          npm install -g shellcheck basedpyright
+
+      - name: Check Shell Scripts (shellcheck)
+        run: |
+          shellcheck -s bash build.sh install.sh
+
+      - name: Compile Native Engine
+        run: |
+          chmod +x build.sh
+          ./build.sh
+          gcc -std=c99 -Wall -Wextra -pedantic -Wno-unused-parameter -D_DEFAULT_SOURCE -Iengine_src -fsyntax-only engine_src/*.c
+
+      - name: Run Ruff Lint & Format Check
+        run: |
+          ruff check . bypass
+          ruff format --check . bypass
+
+      - name: Run Basedpyright Type Checker
+        run: |
+          basedpyright bypass bypass_http_proxy.py tests/test_bypass.py

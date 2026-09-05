@@ -43,7 +43,7 @@ if [[ ":$PATH:" != *":${HOME}/.local/bin:"* ]]; then
     echo ""
     echo "[!] Notice: ~/.local/bin is not currently in your PATH."
     echo "    To run 'bypass' from anywhere, add this to your ~/.bashrc or ~/.zshrc:"
-    echo '    export PATH="$HOME/.local/bin:$PATH"'
+    echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo "    Or run directly: ${INSTALL_TARGET} start"
 fi
 

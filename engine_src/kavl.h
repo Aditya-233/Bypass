@@ -271,40 +271,44 @@ int main(void) {
 
 #define __KAVL_ITR(suf, __scope, __type, __head, __cmp) \
 	struct kavl_itr_##suf { \
-		const __type *stack[KAVL_MAX_DEPTH], **top, *right; /* _right_ points to the right child of *top */ \
+		const __type *stack[KAVL_MAX_DEPTH]; \
+		int top; \
+		const __type *right; /* _right_ points to the right child of *top */ \
 	}; \
 	__scope void kavl_itr_first_##suf(const __type *root, struct kavl_itr_##suf *itr) { \
 		const __type *p; \
-		for (itr->top = itr->stack - 1, p = root; p; p = p->__head.p[0]) \
-			*++itr->top = p; \
-		itr->right = (*itr->top)->__head.p[1]; \
+		itr->top = -1; \
+		for (p = root; p; p = p->__head.p[0]) \
+			itr->stack[++itr->top] = p; \
+		itr->right = itr->top >= 0 ? itr->stack[itr->top]->__head.p[1] : 0; \
 	} \
 	__scope int kavl_itr_find_##suf(const __type *root, const __type *x, struct kavl_itr_##suf *itr) { \
 		const __type *p = root; \
-		itr->top = itr->stack - 1; \
+		itr->top = -1; \
 		while (p != 0) { \
 			int cmp; \
 			cmp = __cmp(x, p); \
-			if (cmp < 0) *++itr->top = p, p = p->__head.p[0]; \
+			if (cmp < 0) { itr->stack[++itr->top] = p; p = p->__head.p[0]; } \
 			else if (cmp > 0) p = p->__head.p[1]; \
 			else break; \
 		} \
 		if (p) { \
-			*++itr->top = p; \
+			itr->stack[++itr->top] = p; \
 			itr->right = p->__head.p[1]; \
 			return 1; \
-		} else if (itr->top >= itr->stack) { \
-			itr->right = (*itr->top)->__head.p[1]; \
+		} else if (itr->top >= 0) { \
+			itr->right = itr->stack[itr->top]->__head.p[1]; \
 			return 0; \
 		} else return 0; \
 	} \
 	__scope int kavl_itr_next_##suf(struct kavl_itr_##suf *itr) { \
 		for (;;) { \
 			const __type *p; \
-			for (p = itr->right, --itr->top; p; p = p->__head.p[0]) \
-				*++itr->top = p; \
-			if (itr->top < itr->stack) return 0; \
-			itr->right = (*itr->top)->__head.p[1]; \
+			--itr->top; \
+			for (p = itr->right; p; p = p->__head.p[0]) \
+				itr->stack[++itr->top] = p; \
+			if (itr->top < 0) return 0; \
+			itr->right = itr->stack[itr->top]->__head.p[1]; \
 			return 1; \
 		} \
 	}
@@ -385,7 +389,7 @@ int main(void) {
  *
  * @return pointer if present; NULL otherwise
  */
-#define kavl_at(itr) ((itr)->top < (itr)->stack? 0 : *(itr)->top)
+#define kavl_at(itr) ((itr)->top < 0 ? 0 : (itr)->stack[(itr)->top])
 
 #define KAVL_INIT2(suf, __scope, __type, __head, __cmp) \
 	__KAVL_FIND(suf, __scope, __type, __head,  __cmp) \

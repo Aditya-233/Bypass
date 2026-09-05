@@ -20,16 +20,8 @@ ssize_t tcp_recv_hook(struct poolhd *pool,
 ssize_t udp_hook(struct eval *val, 
         char *buffer, ssize_t n, const union sockaddr_u *dst);
     
-static bool check_l34(struct desync_params *dp, int st, const union sockaddr_u *dst);
-
 int on_connerr(struct poolhd *pool, struct eval *val);
 
 int on_timeout(struct poolhd *pool, struct eval *val);
-
-#ifdef __linux__
-static int protect(int conn_fd, const char *path);
-#else
-#define protect(fd, path) 0
-#endif
 
 #endif
